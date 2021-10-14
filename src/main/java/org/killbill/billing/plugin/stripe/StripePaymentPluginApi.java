@@ -104,6 +104,7 @@ public class StripePaymentPluginApi extends PluginPaymentPluginApi<StripeRespons
     public static final String PROPERTY_FROM_HPP = "fromHPP";
     public static final String PROPERTY_HPP_COMPLETION = "fromHPPCompletion";
     public static final String PROPERTY_OVERRIDDEN_TRANSACTION_STATUS = "overriddenTransactionStatus";
+    public static final String PROPERTY_PAYMENT_METHOD_DELETE_NO_STRIPE_DELETE = "plugin_PaymentMthdDelNoDeleteInStripe";
 
     private final StripeConfigPropertiesConfigurationHandler stripeConfigPropertiesConfigurationHandler;
     private final StripeDao dao;
@@ -113,7 +114,6 @@ public class StripePaymentPluginApi extends PluginPaymentPluginApi<StripeRespons
     // needed for API calls to expand the response to contain the 'Sources'
     // https://stripe.com/docs/api/expanding_objects?lang=java
     private final Map<String, Object> expandSourcesParams;
-
 
     public StripePaymentPluginApi(final StripeConfigPropertiesConfigurationHandler stripeConfigPropertiesConfigurationHandler,
                                   final OSGIKillbillAPI killbillAPI,
@@ -126,7 +126,6 @@ public class StripePaymentPluginApi extends PluginPaymentPluginApi<StripeRespons
         expandSourcesParams = new HashMap<String, Object>();
         expandSourcesParams.put("expand", ImmutableList.of("sources"));
     }
-
 
     @Override
     public List<PaymentTransactionInfoPlugin> getPaymentInfo(final UUID kbAccountId,
@@ -175,16 +174,16 @@ public class StripePaymentPluginApi extends PluginPaymentPluginApi<StripeRespons
                     }
                     // 3DS authorization failure - Fail payment according to property
                     else if (stripeConfigPropertiesConfigurationHandler.getConfigurable(context.getTenantId()).isCancelOn3DSAuthorizationFailure()
-                            && "requires_payment_method".equals(intent.getStatus())
-                            && intent.getLastPaymentError() != null
-                            && "payment_intent_authentication_failure".equals(intent.getLastPaymentError().getCode())) {
+                             && "requires_payment_method".equals(intent.getStatus())
+                             && intent.getLastPaymentError() != null
+                             && "payment_intent_authentication_failure".equals(intent.getLastPaymentError().getCode())) {
                         logger.info("Cancelling Stripe PaymentIntent after 3DS authorization failure {}", intent.getId());
                         intent = intent.cancel(
-                                    PaymentIntentCancelParams.builder()
-                                            .setCancellationReason(PaymentIntentCancelParams.CancellationReason.ABANDONED)
-                                            .build(),
-                                    requestOptions
-                            );
+                                PaymentIntentCancelParams.builder()
+                                                         .setCancellationReason(PaymentIntentCancelParams.CancellationReason.ABANDONED)
+                                                         .build(),
+                                requestOptions
+                                              );
                     }
                     dao.updateResponse(transaction.getKbTransactionPaymentId(), intent, context.getTenantId());
                     wasRefreshed = true;
@@ -388,14 +387,25 @@ public class StripePaymentPluginApi extends PluginPaymentPluginApi<StripeRespons
         }
 
         // Delete in Stripe
-        final RequestOptions requestOptions = buildRequestOptions(context);
-        try {
-            PaymentMethod.retrieve(stripePaymentMethodsRecord.getStripeId(), requestOptions).detach(requestOptions);
-        } catch (final StripeException e) {
-            throw new PaymentPluginApiException("Unable to delete Stripe payment method", e);
+        if (shouldDeleteFromStripe(properties)) {
+            final RequestOptions requestOptions = buildRequestOptions(context);
+            try {
+                PaymentMethod.retrieve(stripePaymentMethodsRecord.getStripeId(), requestOptions).detach(requestOptions);
+            } catch (final StripeException e) {
+                throw new PaymentPluginApiException("Unable to delete Stripe payment method", e);
+            }
         }
 
         super.deletePaymentMethod(kbAccountId, kbPaymentMethodId, properties, context);
+    }
+
+    private boolean shouldDeleteFromStripe(final Iterable<PluginProperty> properties) {
+        for (PluginProperty property : properties) {
+            if (PROPERTY_PAYMENT_METHOD_DELETE_NO_STRIPE_DELETE.equalsIgnoreCase(property.getKey())) {
+                return "true".equalsIgnoreCase(String.valueOf(property.getValue()));
+            }
+        }
+        return true;
     }
 
     @Override
@@ -686,16 +696,16 @@ public class StripePaymentPluginApi extends PluginPaymentPluginApi<StripeRespons
         final Map<String, Object> params = new HashMap<String, Object>();
         final Map<String, Object> metadata = new HashMap<String, Object>();
         StreamSupport.stream(customFields.spliterator(), false)
-        	.filter(entry -> !metadataFilter.contains(entry.getKey()))
-        	.forEach(p -> metadata.put(p.getKey(), p.getValue()));
+                     .filter(entry -> !metadataFilter.contains(entry.getKey()))
+                     .forEach(p -> metadata.put(p.getKey(), p.getValue()));
         params.put("metadata", metadata);
         params.put("customer", stripeCustomerId);
 
         final List<String> defaultPaymentMethodTypes = new ArrayList<String>();
         defaultPaymentMethodTypes.add("card");
         final PluginProperty customPaymentMethods = StreamSupport.stream(customFields.spliterator(), false)
-                     .filter(entry -> "payment_method_types".equals(entry.getKey()))
-                     .findFirst().orElse(null);
+                                                                 .filter(entry -> "payment_method_types".equals(entry.getKey()))
+                                                                 .findFirst().orElse(null);
         params.put("payment_method_types", customPaymentMethods != null && customPaymentMethods.getValue() != null ? customPaymentMethods.getValue() : defaultPaymentMethodTypes);
 
         params.put("mode", "setup");
