@@ -1,7 +1,7 @@
 # killbill-stripe-plugin
 ![Maven Central](https://img.shields.io/maven-central/v/org.kill-bill.billing.plugin.java/stripe-plugin?color=blue&label=Maven%20Central)
 
-Plugin to use [Stripe](https://stripe.com/) as a gateway.
+Plugin to use [Stripe](https://stripe.com/) as a gateway test
 
 A full end-to-end integration demo is available [here](https://github.com/killbill/killbill-stripe-demo).
 
